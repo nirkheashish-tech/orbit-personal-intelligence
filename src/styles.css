@@ -6,3 +6,23 @@
 .icon-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:30px;height:30px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:18px;line-height:28px}
 .icon-btn.danger{color:#b42318}
 .icon-btn.danger:hover{background:#fff1f0;border-color:#f3b4ae}
+
+.auto-status{margin-top:12px;border:1px solid var(--line);background:#fff;border-radius:12px;padding:11px 13px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow)}
+.auto-status>span{font-size:16px}.auto-status>div{flex:1}.auto-status b{display:block;font-size:12px}.auto-status small{display:block;color:var(--muted);margin-top:3px}.auto-status.on{border-color:#c9eadb;background:#f7fffb}.auto-status.on>span{color:var(--green)}.auto-status.off{background:#fafbfc}.auto-settings{margin-top:18px;padding:14px;border:1px solid var(--line);border-radius:10px;background:#fbfcfe}.auto-settings h3{margin:0 0 4px}.auto-settings p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.switch-row{display:flex!important;align-items:center;justify-content:space-between;gap:12px;margin-top:14px!important}.switch-row input{width:18px;height:18px;accent-color:var(--blue)}
+
+/* AI output: render Markdown as readable, structured content rather than raw syntax. */
+.markdown{color:#536078;line-height:1.58;font-size:14px}
+.markdown p{margin:7px 0}
+.markdown p:first-child{margin-top:6px}
+.markdown h2,.markdown h3,.markdown h4{color:var(--text);line-height:1.25;margin:16px 0 7px;font-weight:650}
+.markdown h2{font-size:17px}.markdown h3{font-size:15px}.markdown h4{font-size:14px}
+.markdown ul,.markdown ol{margin:7px 0 10px;padding-left:22px}
+.markdown li{margin:5px 0;padding-left:2px}
+.markdown strong{color:#273650;font-weight:650}
+.markdown em{color:#536078}
+.markdown code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#f1f4f8;border:1px solid #e5e9ef;border-radius:5px;padding:2px 5px;color:#344057}
+.markdown blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid #9bbcff;background:#f7faff;color:#5b6880;border-radius:0 7px 7px 0}
+.markdown hr{border:0;border-top:1px solid #e8edf3;margin:14px 0}
+.markdown a{color:var(--blue);text-decoration:none}.markdown a:hover{text-decoration:underline}
+.snapshot .markdown{font-size:15px}.snapshot .markdown h2,.snapshot .markdown h3{font-size:16px}
+.item .markdown{margin-top:2px}

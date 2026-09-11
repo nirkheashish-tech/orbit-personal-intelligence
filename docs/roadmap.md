@@ -5,7 +5,7 @@
 - Global search across boards and intelligence.
 - Better source cards with URLs, dates, and provenance.
 - Model discovery for LM Studio and Ollama.
-- Background research jobs with explicit source provenance.
+- ~~Background research jobs with explicit source provenance.~~ Implemented in v0.2: automatic goal-aware research runs from the Electron main process, with global and per-board controls.
 - Goal editing, pausing, ordering, and goal history.
 
 ## Next layer

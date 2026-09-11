@@ -42,6 +42,8 @@ Use local models through LM Studio or Ollama, or connect cloud APIs from OpenAI 
 
 ## Current capabilities
 
+- **Automatic intelligence:** boards with goals can be watched continuously; ORBIT independently decides what is worth investigating and updates intelligence + synthesis without requiring a research question. Automatic research can be disabled globally or per board, with 1h / 3h / 6h / 12h / daily cadence controls.
+
 - 🧠 Persistent boards
 - 🎯 0..N goals per board
 - ✍️ Scratchpad thinking

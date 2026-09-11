@@ -7,13 +7,36 @@ const DATA_DIR = path.join(app.getPath('userData'), 'data');
 const DB_FILE = path.join(DATA_DIR, 'orbit.sqlite');
 const KEY_FILES = { openai:path.join(DATA_DIR,'openai.key'), anthropic:path.join(DATA_DIR,'anthropic.key') };
 const PROVIDER_FILE = path.join(DATA_DIR, 'provider.json');
+const AUTO_FILE = path.join(DATA_DIR, 'auto-research.json');
+const STARTER_GOALS_FILE = path.join(DATA_DIR, 'starter-goals-v1.json');
+const AUTO_INTERVALS = [1, 3, 6, 12, 24];
 let db;
+let autoTimer;
+let autoRunning = false;
 
 const seedBoards = [
   { id:'ai', title:'AI', description:'Track important developments in AI.', icon:'✦' },
   { id:'finance', title:'Personal Investing', description:'Explore markets, products, and opportunities.', icon:'$' },
   { id:'photo', title:'Photography & Video', description:'Creative tools, cameras, workflows, and creator economy.', icon:'◉' }
 ];
+
+const starterGoals = {
+  ai: [
+    { title:'Track major shifts in AI capabilities and products', description:'Identify meaningful advances in models, agents, multimodal AI, reasoning, and AI-native products that could change what is possible.' },
+    { title:'Understand the infrastructure and economics behind AI', description:'Track developments in compute, chips, inference costs, data centers, energy, and model economics that could materially affect the AI landscape.' },
+    { title:'Identify regulatory, business, and societal shifts that could reshape AI', description:'Follow important developments in regulation, enterprise adoption, monetization, safety, and competitive dynamics that could change the trajectory of AI.' }
+  ],
+  finance: [
+    { title:'Understand the forces driving markets and the economy', description:'Track major developments in interest rates, inflation, employment, economic growth, and liquidity that could materially affect markets.' },
+    { title:'Identify important changes in companies and industries', description:'Surface developments in technology, competition, regulation, earnings, and business models that could create meaningful opportunities or risks.' },
+    { title:'Discover long-term investment themes before they become consensus', description:'Look for structural trends, emerging technologies, and changing consumer or business behavior that could create significant opportunities over a multi-year horizon.' }
+  ],
+  photo: [
+    { title:'Discover techniques that meaningfully improve photography and visual storytelling', description:'Find practical advances in composition, lighting, color, shooting techniques, and visual storytelling that can improve creative results.' },
+    { title:'Track meaningful advances in cameras, lenses, and imaging technology', description:'Identify new technology and products that materially change image quality, workflow, or creative possibilities.' },
+    { title:'Explore better creative and AI-powered photography/video workflows', description:'Track tools and techniques for editing, organization, post-production, generative AI, and automation that can make the creative process more powerful or efficient.' }
+  ]
+};
 
 function openDb(){
   fs.mkdirSync(DATA_DIR,{recursive:true});
@@ -25,21 +48,40 @@ function openDb(){
     CREATE TABLE IF NOT EXISTS intelligence(id TEXT PRIMARY KEY,board_id TEXT NOT NULL,title TEXT NOT NULL,summary TEXT NOT NULL,source TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS syntheses(id TEXT PRIMARY KEY,board_id TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT NOT NULL);
   `);
+  try { db.exec('ALTER TABLE boards ADD COLUMN auto_research_enabled INTEGER NOT NULL DEFAULT 1'); } catch (e) {
+    if (!String(e.message).includes('duplicate column')) throw e;
+  }
   const count = db.prepare('SELECT COUNT(*) c FROM boards').get().c;
   if(Number(count)===0){
     const now=new Date().toISOString();
-    const ins=db.prepare('INSERT INTO boards VALUES (?,?,?,?,?)');
-    for(const b of seedBoards) ins.run(b.id,b.title,b.description,b.icon,now);
+    const ins=db.prepare('INSERT INTO boards VALUES (?,?,?,?,?,?)');
+    for(const b of seedBoards) ins.run(b.id,b.title,b.description,b.icon,now,1);
   }
   // Remove the old Adobe demo board from databases created by earlier prototypes.
   for(const table of ['goals','notes','intelligence','syntheses']) db.prepare(`DELETE FROM ${table} WHERE board_id=?`).run('adobe');
   db.prepare('DELETE FROM boards WHERE id=?').run('adobe');
+
+  // Give the three built-in example boards meaningful starter goals once.
+  // This is intentionally a one-time migration so a user who later removes
+  // all goals is not surprised by them being recreated on every launch.
+  if(!fs.existsSync(STARTER_GOALS_FILE)){
+    const now=new Date().toISOString();
+    const addGoal=db.prepare('INSERT INTO goals VALUES (?,?,?,?,?,?,?,?)');
+    for(const [boardId, goals] of Object.entries(starterGoals)){
+      const board=db.prepare('SELECT id FROM boards WHERE id=?').get(boardId);
+      const existing=db.prepare('SELECT COUNT(*) c FROM goals WHERE board_id=?').get(boardId)?.c||0;
+      if(board && Number(existing)===0){
+        goals.forEach((g,i)=>addGoal.run(uid('g'),boardId,g.title,g.description,'Exploring',i,now,now));
+      }
+    }
+    fs.writeFileSync(STARTER_GOALS_FILE,JSON.stringify({version:1,createdAt:now},null,2));
+  }
 }
 function uid(prefix){return prefix+'_'+Math.random().toString(36).slice(2,10)}
 function readData(){
   const boards=db.prepare('SELECT * FROM boards ORDER BY created_at').all();
   return {version:1,activeBoardId:boards[0]?.id||null,boards:boards.map(b=>({
-    id:b.id,title:b.title,description:b.description,icon:b.icon,
+    id:b.id,title:b.title,description:b.description,icon:b.icon,autoResearchEnabled:b.auto_research_enabled!==0,
     goals:db.prepare('SELECT id,title,description,status,position FROM goals WHERE board_id=? ORDER BY position').all(b.id),
     notes:db.prepare('SELECT id,text,created_at createdAt FROM notes WHERE board_id=? ORDER BY created_at').all(b.id),
     intelligence:db.prepare('SELECT id,title,summary,source,url,created_at createdAt FROM intelligence WHERE board_id=? ORDER BY created_at').all(b.id),
@@ -55,10 +97,10 @@ function saveData(data){
   try{
     const existing=new Set(db.prepare('SELECT id FROM boards').all().map(x=>x.id));
     const seen=new Set();
-    const up=db.prepare('INSERT INTO boards VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,icon=excluded.icon');
+    const up=db.prepare('INSERT INTO boards(id,title,description,icon,created_at,auto_research_enabled) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,icon=excluded.icon,auto_research_enabled=excluded.auto_research_enabled');
     for(const b of data.boards){
       seen.add(b.id);
-      up.run(b.id,b.title,b.description,b.icon,new Date().toISOString());
+      up.run(b.id,b.title,b.description,b.icon,new Date().toISOString(),b.autoResearchEnabled===false?0:1);
       db.prepare('DELETE FROM goals WHERE board_id=?').run(b.id);
       const gi=db.prepare('INSERT INTO goals VALUES (?,?,?,?,?,?,?,?)');
       (b.goals||[]).forEach((g,i)=>gi.run(g.id,b.id,g.title,g.description,g.status||'Exploring',i,g.createdAt||new Date().toISOString(),new Date().toISOString()));
@@ -121,15 +163,32 @@ function normalizeOpenAICompatibleBaseUrl(value){
   if(!/\/v1$/i.test(base)) base+='/v1';
   return base;
 }
+function autoConfig(){
+  try { return JSON.parse(fs.readFileSync(AUTO_FILE,'utf8')); }
+  catch { return {enabled:true,intervalHours:6,lastRunAt:null}; }
+}
+function setAutoConfig(cfg){
+  const next={...autoConfig(),...cfg};
+  if(!AUTO_INTERVALS.includes(Number(next.intervalHours))) next.intervalHours=6;
+  fs.mkdirSync(DATA_DIR,{recursive:true});
+  fs.writeFileSync(AUTO_FILE,JSON.stringify(next,null,2));
+  return next;
+}
+function getAutoStatus(){
+  const c=autoConfig();
+  return {enabled:c.enabled!==false,intervalHours:Number(c.intervalHours)||6,lastRunAt:c.lastRunAt||null,running:autoRunning};
+}
+
 async function callProvider({mode,board}){
   const cfg=getProvider();
   const provider=cfg.provider||'openai-compatible';
   const goals=board.goals.map(g=>`- ${g.title}: ${g.description} [${g.status}]`).join('\n')||'No goals defined.';
   const notes=board.notes.slice(-20).map(n=>`- ${n.text}`).join('\n')||'No scratchpad notes.';
   const intel=board.intelligence.slice(-10).map(i=>`- ${i.title}: ${i.summary}`).join('\n')||'No previous intelligence.';
+  const synthesis=board.synthesis||'No synthesis yet.';
   const prompt=mode==='research'
-    ?`You are ORBIT, a personal intelligence analyst. Analyze this board and identify 3-5 meaningful signals. Avoid generic headlines. For each signal explain why it matters to the goals or, if there are no goals, why it matters to the board. End with a concise synthesis of what changed. IMPORTANT: only claim that you performed live web research if a live web-search tool is actually available in your runtime. If no live web search is available, clearly label the output as model-based analysis and do not fabricate current events, sources, dates, or browsing. Board: ${board.title}\nDescription: ${board.description}\nGoals:\n${goals}\nScratchpad:\n${notes}\nPrevious intelligence:\n${intel}`
-    :`You are ORBIT, a strategic thinking partner. Update the board's living synthesis using goals, scratchpad notes and recent intelligence. Explain what changed, which goals are affected, and any emerging hypothesis. Do not invent facts. Board: ${board.title}\nDescription: ${board.description}\nGoals:\n${goals}\nScratchpad:\n${notes}\nRecent intelligence:\n${intel}`;
+    ?`You are ORBIT, a personal intelligence system. Do not ask the user what to research. Independently determine what is most worth investigating now from this board's goals, description, scratchpad, existing intelligence, and living synthesis. Prioritize meaningful developments, evidence, trends, contradictions, risks, opportunities, or changes that could alter understanding. Look for genuinely new information relative to existing intelligence. If there is no meaningful new information worth adding, return exactly NO_NEW_INTELLIGENCE. Otherwise provide 3-5 concise signals with a title, what changed, why it matters, and a source/URL only when a live source was actually consulted. Never fabricate browsing, sources, dates, or events. This may be an automatic background cycle; be selective and add nothing when there is no meaningful new intelligence.\nBOARD: ${board.title}\nDESCRIPTION: ${board.description}\nGOALS:\n${goals}\nSCRATCHPAD:\n${notes}\nCURRENT SYNTHESIS:\n${synthesis}\nPREVIOUS INTELLIGENCE:\n${intel}`
+    :`You are ORBIT, a strategic thinking partner. Update the board's living synthesis using goals, scratchpad notes, recent intelligence, and the prior synthesis. Explain what changed, which goals are affected, and any emerging or weakened hypothesis. Do not invent facts. Board: ${board.title}\nDescription: ${board.description}\nGoals:\n${goals}\nScratchpad:\n${notes}\nRecent intelligence:\n${intel}\nPrevious synthesis:\n${synthesis}`;
   if(provider==='ollama'){
     const base=(cfg.ollama?.baseUrl||'http://127.0.0.1:11434').replace(/\/$/,'');
     const r=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:cfg.ollama?.model||'qwen3:8b',messages:[{role:'user',content:prompt}],stream:false,options:{temperature:0.3}})});
@@ -156,8 +215,50 @@ async function callProvider({mode,board}){
   }
   throw new Error('Choose an AI provider in Settings.');
 }
+async function automaticResearchCycle(){
+  if(autoRunning) return {ran:false,reason:'already-running'};
+  const cfg=autoConfig();
+  if(cfg.enabled===false) return {ran:false,reason:'disabled'};
+  autoRunning=true;
+  try {
+    const data=readData(); let processed=0;
+    for(const board of data.boards){
+      if(board.autoResearchEnabled===false || board.goals.length===0) continue;
+      const text=await callProvider({mode:'research',board});
+      if(!text || text.trim()==='NO_NEW_INTELLIGENCE') continue;
+      const now=new Date().toISOString();
+      const provider=getProvider().provider;
+      const source=provider==='openai'?'ORBIT · web research':provider==='anthropic'?'ORBIT · automatic analysis':'ORBIT · automatic analysis (local model; no live web search)';
+      db.prepare('INSERT INTO intelligence VALUES (?,?,?,?,?,?,?)').run(uid('i'),board.id,'ORBIT automatic research',text,source,null,now);
+      const fresh=readData().boards.find(x=>x.id===board.id);
+      if(fresh){
+        const syn=await callProvider({mode:'synthesis',board:fresh});
+        db.prepare('DELETE FROM syntheses WHERE board_id=?').run(board.id);
+        db.prepare('INSERT INTO syntheses VALUES (?,?,?,?)').run(uid('s'),board.id,syn||fresh.synthesis,new Date().toISOString());
+      }
+      processed++;
+    }
+    const next=setAutoConfig({lastRunAt:new Date().toISOString()});
+    return {ran:true,processed,lastRunAt:next.lastRunAt};
+  } finally { autoRunning=false; }
+}
+function startAutoResearch(){
+  clearInterval(autoTimer);
+  const tick=async()=>{
+    const c=autoConfig(); if(c.enabled===false||autoRunning) return;
+    const last=c.lastRunAt?new Date(c.lastRunAt).getTime():0;
+    const due=!last || Date.now()-last>=Number(c.intervalHours||6)*3600000;
+    if(due){try{await automaticResearchCycle()}catch(e){console.error('ORBIT automatic research failed:',e.message)}}
+  };
+  setTimeout(tick,15000);
+  autoTimer=setInterval(tick,5*60*1000);
+}
+
 function createWindow(){const win=new BrowserWindow({width:1440,height:920,minWidth:1100,minHeight:720,backgroundColor:'#f7f9fc',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false}});win.loadFile(path.join(__dirname,'index.html'))}
-app.whenReady().then(()=>{openDb();ipcMain.handle('data:get',()=>readData());ipcMain.handle('data:save',(_,d)=>saveData(d));ipcMain.handle('provider:get',()=>{const c=getProvider();return {provider:c.provider||'openai-compatible',ollama:{baseUrl:c.ollama?.baseUrl||'http://127.0.0.1:11434',model:c.ollama?.model||'qwen3:8b'},openaiCompatible:{baseUrl:normalizeOpenAICompatibleBaseUrl(c.openaiCompatible?.baseUrl||'http://127.0.0.1:1234'),model:c.openaiCompatible?.model||''},openai:{model:c.openai?.model||'gpt-5-mini',configured:Boolean(getApiKey('openai'))},anthropic:{model:c.anthropic?.model||'claude-sonnet-4-5',configured:Boolean(getApiKey('anthropic'))}}});ipcMain.handle('provider:set',(_,cfg)=>{setProvider(cfg);return getProvider()});ipcMain.handle('provider:test',async(_,cfg)=>{
+app.whenReady().then(()=>{openDb();ipcMain.handle('data:get',()=>readData());ipcMain.handle('data:save',(_,d)=>saveData(d));
+  ipcMain.handle('auto:get',()=>getAutoStatus());
+  ipcMain.handle('auto:set',(_,cfg)=>{const next=setAutoConfig(cfg);startAutoResearch();return {enabled:next.enabled!==false,intervalHours:Number(next.intervalHours)||6,lastRunAt:next.lastRunAt||null,running:autoRunning};});
+  ipcMain.handle('auto:run',()=>automaticResearchCycle());ipcMain.handle('provider:get',()=>{const c=getProvider();return {provider:c.provider||'openai-compatible',ollama:{baseUrl:c.ollama?.baseUrl||'http://127.0.0.1:11434',model:c.ollama?.model||'qwen3:8b'},openaiCompatible:{baseUrl:normalizeOpenAICompatibleBaseUrl(c.openaiCompatible?.baseUrl||'http://127.0.0.1:1234'),model:c.openaiCompatible?.model||''},openai:{model:c.openai?.model||'gpt-5-mini',configured:Boolean(getApiKey('openai'))},anthropic:{model:c.anthropic?.model||'claude-sonnet-4-5',configured:Boolean(getApiKey('anthropic'))}}});ipcMain.handle('provider:set',(_,cfg)=>{setProvider(cfg);return getProvider()});ipcMain.handle('provider:test',async(_,cfg)=>{
   const prev=getProvider();
   try{
     setProvider(cfg);
@@ -169,4 +270,4 @@ app.whenReady().then(()=>{openDb();ipcMain.handle('data:get',()=>readData());ipc
     return {ok:true,preview:(text||'Connected').slice(0,160)};
   }catch(e){return {ok:false,error:e.message}}
   finally{setProvider(prev)}
-});ipcMain.handle('key:set',(_,args)=>{setApiKey(args.provider,args.key);return{configured:true}});ipcMain.handle('key:getStatus',(_,provider)=>({configured:Boolean(getApiKey(provider))}));ipcMain.handle('ai:run',async(_,args)=>{const data=readData();const board=data.boards.find(b=>b.id===args.boardId);if(!board)throw new Error('Board not found');return callProvider({mode:args.mode,board})});ipcMain.handle('open:url',(_,url)=>{if(/^https?:\/\//.test(url))shell.openExternal(url)});createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow()})});app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});
+});ipcMain.handle('key:set',(_,args)=>{setApiKey(args.provider,args.key);return{configured:true}});ipcMain.handle('key:getStatus',(_,provider)=>({configured:Boolean(getApiKey(provider))}));ipcMain.handle('ai:run',async(_,args)=>{const data=readData();const board=data.boards.find(b=>b.id===args.boardId);if(!board)throw new Error('Board not found');return callProvider({mode:args.mode,board})});ipcMain.handle('open:url',(_,url)=>{if(/^https?:\/\//.test(url))shell.openExternal(url)});createWindow();startAutoResearch();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow()})});app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});

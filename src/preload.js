@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('orbit', {
   setProvider: cfg => ipcRenderer.invoke('provider:set', cfg),
   testProvider: cfg => ipcRenderer.invoke('provider:test', cfg),
   runAI: args => ipcRenderer.invoke('ai:run', args),
+  getAutoResearch: () => ipcRenderer.invoke('auto:get'),
+  setAutoResearch: cfg => ipcRenderer.invoke('auto:set', cfg),
+  runAutoResearch: () => ipcRenderer.invoke('auto:run'),
   openUrl: url => ipcRenderer.invoke('open:url', url)
 });

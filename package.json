@@ -1,6 +1,6 @@
 {
   "name": "orbit-personal-intelligence",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ORBIT \u2014 a local-first personal intelligence workspace",
   "main": "src/main.js",
   "author": "ORBIT",
