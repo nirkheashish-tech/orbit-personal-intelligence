@@ -125,7 +125,7 @@ These are examples—not hardcoded product verticals. Users can create and remov
 
 ## Roadmap
 
-Near-term priorities include global search, richer source provenance, model discovery, background research jobs, goal history, cross-board patterns, hypothesis tracking, and strategy-drift detection.
+Near-term priorities include global search, richer source provenance, model discovery, goal history, and a deeper research/provenance layer. Automatic goal-aware research is already implemented in v0.2.0.
 
 ## Contributing
 
